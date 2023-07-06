@@ -3,6 +3,7 @@ title: "6-Network Analysis"
 author: "Arlie McCarthy"
 date: "25/03/2021"
 output: 
+  github_document: default
   html_document: default
 always_allow_html: true
 knit: (function(inputFile, encoding) {
