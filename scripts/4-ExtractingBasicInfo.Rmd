@@ -1,0 +1,626 @@
+---
+title: "4-ExtractingBasicInfo"
+author: "Arlie McCarthy"
+date: "25/03/2021"
+output: 
+  github_document: default
+  html_document: default
+always_allow_html: true
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = "workflow") })
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+library(tidyverse)
+library(readr)
+library(maps)
+library(mapdata)
+library(sp)
+library(sf)
+library(rnaturalearth)
+library(maptools)
+library(spatstat)
+library(cowplot) # grid arrangement of plots
+library(hrbrthemes) # hrbrmstr themes
+library(mapproj)
+library(rgeos)
+library(lubridate)
+library(readxl)
+library(kableExtra)
+library(viridis)
+library(here)
+library(janitor)
+```
+
+# Summary
+This file extracts basic results on the vessels, observations and port calls, such as:
+
+- number of ships per year (of different activity types),  
+- monthly activity,  
+- most visited ports and countries outside Antarctica,  
+- nearshore coastal observations (within 5km)
+- proportion of ships that exist on lists of e.g. fishing, tourism or research vessels
+
+```{r IMPORT MASTER FILES, message=FALSE}
+trips_main <- read_csv(here::here("cleaned_data", "trips_networks.csv")) %>%
+  clean_names()
+port_locations_main <- read_csv(here::here("cleaned_data", "port_locations_main.csv"),
+                                col_types = cols(movement_type = col_character(),
+                                                 notes = col_character(),
+                                                 source = col_character())) %>%
+  mutate(place = case_when(
+    place == "Bahia Fildes" ~ "Maxwell Bay", # fixed some movements using a different name for the same place
+    TRUE ~ as.character(place)
+  )) %>%
+  clean_names()
+vessels_main <- read_csv(here("cleaned_data", "vessels_main.csv"))
+```
+## Extracting Basic Data on Vessels and port calls
+
+### How many ships in total visited the Southern Ocean (south of -60) from 2014-2018 inclusive?
+```{r VESSELS}
+# number of vessels that visited in the 5-year period: 256 (based on the the vessels list)
+length(unique(vessels_main$vessel_id))
+```
+
+### How many ships visited the southern ocean each year? 
+
+This is based on the full set of data that passed QC, not what appears in the networks later on since they have slightly stricter criteria for inclusion. 
+```{r VESSELS TABLES}
+vessels_yearV <- vessels_main %>%
+  filter(year != 2013) %>% # data included one ship's information for 2013, so I exclude it
+  group_by(year) %>%
+  distinct(vessel_id) %>%
+  count()
+kable(vessels_yearV) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+
+Other basic stats include: 
+
+- total number of ships,  
+- number of ships of each activity type,  
+- number of ships of each activity type per year. 
+
+The list of vessels I was given, includes a row for each vessel each year. The list of vessels, rather that the observation data is used to calculated the number of ships per year etc in this instance.
+
+```{r MORE VESSELS TABLES}
+# This gives me the number of ships that visited only 1 year or multiple years etc.
+# Most ships are repeat visitors.
+ships_visits <- vessels_main %>%
+  filter(year != 2013) %>%
+  group_by(vessel_id) %>%
+  distinct(year) %>%
+  count() %>%
+  group_by(n) %>%
+  count() %>%
+  rename("N. years visited" = n, "N. ships" = nn)
+kable(ships_visits) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+
+# This gives the number of ships that belong to each of my broad activity types.
+ships_type <- vessels_main %>%
+  filter(year != 2013) %>%
+  group_by(activity_type) %>%
+  distinct(vessel_id) %>%
+  count()
+kable(ships_type) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+Now, let's take a closer look at temporal variation in activity, starting with monthly variation for all vessels, then monthly variation for activity types. 
+
+```{r SHIP PER MONTH AND YEAR}
+ships_month_year <- trips_main %>%
+  filter(lat_2 <= -60) %>%
+  mutate(month = month(date_time), year = year(date_time)) %>%
+  filter(year > 2013) %>%
+  group_by(month, year) %>%
+  summarise(n = n_distinct(vessel_id))
+
+vessels_fishing <- vessels_main %>%
+  filter(activity_type == "fishing")
+vessels_research <- vessels_main %>%
+  filter(activity_type == "research")
+vessels_tourism <- vessels_main %>%
+  filter(activity_type == "tourism")
+vessels_supply <- vessels_main %>%
+  filter(activity_type == "supply")
+vessels_other <- vessels_main %>%
+  filter(activity_type == "other")
+
+ships_month_activity <- trips_main %>%
+  filter(lat_2 <= -60) %>%
+  mutate(
+    month = month(date_time), year = year(date_time),
+    activity_type = case_when(
+      vessel_id %in% vessels_fishing$vessel_id ~ "fishing",
+      vessel_id %in% vessels_research$vessel_id ~ "research",
+      vessel_id %in% vessels_tourism$vessel_id ~ "tourism",
+      vessel_id %in% vessels_supply$vessel_id ~ "supply",
+      vessel_id %in% vessels_other$vessel_id ~ "other"
+    )
+  ) %>%
+  filter(year > 2013) %>%
+  group_by(activity_type, month, year) %>%
+  summarise(n = n_distinct(vessel_id)) %>%
+  group_by(activity_type, month) %>%
+  summarise(mean = mean(n), sd = sd(n)) %>%
+  replace(is.na(.), 0)
+```
+This table shows the number of vessels of each type present in each year, the total number of ships each year.
+```{r SHIPS PER year AND ACTIVITY}
+ships_year_activity <- vessels_main %>%
+  filter(year != 2013) %>%
+  group_by(activity_type, year) %>%
+  distinct(vessel_id) %>%
+  count()
+ships_year_activity$total <- rep(vessels_yearV$n, 5)
+ships_year_activity$pcent <- ships_year_activity$n / ships_year_activity$total * 100
+kable(ships_year_activity, format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = F,
+                fixed_thead = TRUE,
+                font_size = 11) %>%
+  scroll_box(height = "300px")
+activity_levels <- c("tourism", "fishing", "research", "supply", "other")
+ships_year_activity$activity_type <- factor(ships_year_activity$activity_type, levels = activity_levels)
+```
+# Activity type by year and by month
+
+The number of ships for each activity type present in my data for each year. There may be a modest increase in tourism, fishing and research vessels over the 5 years. Supply ships had a peak in 2015, perhaps due to the adption of the polar code in 2016 which introduced more stringent regulations for ships active in the polar regions.
+```{r ACTIVITY TYPE PER year PLOT}
+activity_type_year <- ggplot(data = ships_year_activity) +
+  geom_bar(
+    mapping = aes(
+      x = year,
+      y = n,
+      fill = activity_type,
+      group = activity_type
+    ),
+    stat = "identity",
+    position = position_stack(reverse = TRUE)
+  ) +
+  scale_fill_viridis(discrete = TRUE, option = "D", end = 0.7) +
+  labs(
+    y = "Number of vessels",
+    x = "Year",
+    fill = "Activity type",
+    group = "Activity type",
+    color = "Activity type",
+    size = 7 / .pt
+  ) +
+  theme_minimal()
+plot(activity_type_year)
+save_plot(here("outputs", "activity_type_year_number_stacked.pdf"),
+          activity_type_year,
+          base_width = 89,
+          units = "mm",
+          base_height = 53)
+save_plot(here("outputs", "activity_type_year_number_stacked.png"),
+          activity_type_year,
+          base_width = 89,
+          units = "mm",
+          base_height = 53)
+```
+
+The pattern of activity from month to month for all ships over the five-year period is very consistent from year to year. 
+
+```{r}
+ships_month_year_plot <- ggplot(data = ships_month_year) +
+  geom_path(mapping = aes(
+    x = as_factor(month),
+    y = n,
+    colour = as_factor(year),
+    group = as_factor(year),
+    width = 0.4
+  )) +
+  geom_point(aes(
+    x = as_factor(month),
+    y = n,
+    colour = as_factor(year),
+    shape = as_factor(year)
+  ),
+  size = 2.5
+  ) +
+  scale_colour_viridis(discrete = TRUE, option = "A", end = 0.7) +
+  labs(
+    y = "Number of vessels",
+    x = "Month",
+    colour = "Year",
+    shape = "Year",
+    group = "Year",
+    size = 7 / .pt
+  ) +
+  theme_minimal()
+plot(ships_month_year_plot)
+save_plot(here("outputs", "ships_month_year.pdf"),
+          ships_month_year_plot,
+          ncol = 1,
+          nrow = 1,
+          base_aspect_ratio = 1.6)
+save_plot(here("outputs", "ships_month_year.png"),
+          ships_month_year_plot,
+          ncol = 1,
+          nrow = 1,
+          base_aspect_ratio = 1.6)
+```
+
+The mean number of ships (+/- standard deviation) of each activity type per month in the Southern Ocean. Activity for all types is lowest in September when sea ice is at its greatest extent and highest in January (Fishing, Tourism, Research), February (supply) or March (other). Tourism has a stronger season than other activities.
+
+```{r}
+ships_month_activity_plot <- ggplot(data = ships_month_activity) +
+  geom_path(mapping = aes(
+    x = as_factor(month),
+    y = mean,
+    colour = as_factor(activity_type),
+    group = as_factor(activity_type)
+  )) +
+  geom_point(aes(
+    x = as_factor(month),
+    y = mean,
+    colour = as_factor(activity_type),
+    shape = as_factor(activity_type),
+    group = activity_type
+  ),
+  size = 2.5
+  ) +
+  geom_linerange(aes(
+    x = as_factor(month),
+    y = mean,
+    colour = as_factor(activity_type),
+    group = as_factor(activity_type),
+    ymin = mean - sd,
+    ymax = mean + sd
+  ),
+  width = 0.4
+  ) +
+  scale_colour_viridis(discrete = TRUE, option = "D", end = 0.7) +
+  labs(
+    y = "Number of vessels",
+    x = "Month",
+    colour = "Activity type",
+    shape = "Activity type",
+    group = "Activitiy type",
+    size = 7 / .pt
+  ) +
+  theme_minimal()
+plot(ships_month_activity_plot)
+save_plot(here("outputs", "ships_month_activity.pdf"),
+          ships_month_activity_plot,
+          ncol = 1,
+          nrow = 1,
+          base_aspect_ratio = 1.6)
+save_plot(here("outputs", "ships_month_activity.png"),
+          ships_month_activity_plot,
+          ncol = 1,
+          nrow = 1,
+          base_aspect_ratio = 1.6)
+```
+
+Save combined plot for paper
+
+```{r}
+aligned_plots <- align_plots(ships_month_year_plot, ships_month_activity_plot, align = "v", axis = "lr")
+ships_months_plots <- plot_grid(aligned_plots[[1]], aligned_plots[[2]],
+  ncol = 1, labels = c("a", "b"),
+  label_size = 8
+)
+save_plot(here("outputs", "ships_months_plots.pdf"),
+          ships_months_plots,
+          ncol = 1,
+          nrow = 2,
+          base_height = 114,
+          base_width = 183,
+          units = "mm")
+save_plot(here("outputs", "ships_months_plots.png"),
+          ships_months_plots,
+          ncol = 1,
+          nrow = 2,
+          base_height = 114,
+          base_width = 183,
+          units = "mm")
+```
+
+# Information from movements (port call) data
+What are the most visited ports and countries in my data? These numbers are based on the number of observations for all ships that visited the Southern Ocean. Later calculations of number of port calls are based on ships that visited my Antarctic ports or Antarctic ecoregions in the network, which includes fewer ships.
+
+### Most-visited ports
+```{r MOVEMENTS TABLE - PORTS}
+movements_port <- trips_main %>%
+  filter(lat_2 > -60) %>%
+  group_by(place) %>%
+  count() %>%
+  arrange(desc(n))
+kable(movements_port, format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, fixed_thead = TRUE, font_size = 11) %>%
+  scroll_box(height = "300px")
+```
+### Most-visited countries
+
+Now also get the number of port calls in each country for ships that go to Antarctica
+
+```{r MOVEMENTS TABLE - COUNTRIES, eval = TRUE}
+movements_country <- trips_main %>%
+  filter(lat_2 > -60) %>%
+  group_by(country) %>%
+  count() %>%
+  arrange(desc(n))
+kable(movements_country, format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, fixed_thead = TRUE, font_size = 11) %>%
+  scroll_box(height = "300px")
+```
+
+
+# Basic numbers for coastal observations  
+For context, I also check how many ship observations are within 5km of the Antarctic shoreline. This is done to compare between the number of ships and observations captured in the network (i.e. allocated to Antarctic locations) and the observations that are coastal anyway. It also contextualises the number of ships and observations offshore
+
+```{r COMPARE COASTAL LOCATIONS}
+antarctica <- map("worldHires", "Antarctica", fill = TRUE)
+antarctica <- st_as_sf(antarctica, coords = c("x", "y"))
+antarctica <- sf::st_transform(antarctica, crs = 3031)
+ant_buffer_5km <- st_buffer(antarctica, +5000)
+so_obs <- trips_main %>% filter(lat_2 < -60)
+so_obs <- st_as_sf(so_obs, coords = c("lon_2", "lat_2"), crs = 4326)
+so_obs <- sf::st_transform(so_obs, crs = 3031)
+so_obs$buffer_coast <- as.logical(st_intersects(so_obs, ant_buffer_5km))
+so_obs_coast <- so_obs %>% filter(buffer_coast == TRUE)
+length(unique(so_obs_coast$vessel_id))
+vessels_so_coast <- vessels_main %>%
+  filter(vessel_id %in% so_obs_coast$vessel_id) %>%
+  group_by(vessel_name) %>%
+  slice(1)
+ant_locs_obs <- so_obs %>% filter(place != "offshore")
+length(unique(ant_locs_obs$vessel_id))
+ant_locs_vessels <- vessels_main %>%
+  filter(vessel_id %in% ant_locs_obs$vessel_id) %>%
+  group_by(vessel_name) %>%
+  slice(1)
+ecoregion_obs <- so_obs %>%
+  filter(ecoregion != "offshore")
+length(unique(ecoregion_obs$vessel_id))
+length(unique(vessels_main$vessel_id))
+```
+Only 157 of 255 (62%) ships are found within 5km of the coastline; 170 of the 255 (67%) ships in total were observed in a designated an Antarctic location. Some Antarctic locations fall outside the 5km buffer zone, hence more ships are found in Antarctic locations than within the 5km buffer of the coastline.  
+
+There are 47108 observations (19% of all Southern Ocean observations) within 5km of the Antarctic coastline, 56864 of which are allocated to Antarctic locations. There are 246168 observations from the Southern Ocean in total. Approximately 23% of Southern Ocean observations are considered visiting coastal Antarctic locations.
+
+MEOW ecoregions captured 198948 observations (81% of the 246168 Southern Ocean observations), which represented activity of 218 of the 255 ships (85%).
+
+```{r}
+write_csv(so_obs, here("cleaned_data", "so_obs.csv"), col_names = TRUE)
+write_csv(so_obs_coast, here("cleaned_data", "so_obs_coast.csv"), col_names = TRUE)
+write_csv(ant_locs_obs, here("cleaned_data", "ant_locs_obs.csv"), col_names = TRUE)
+write_csv(ecoregion_obs, here("cleaned_data", "ecoregion_obs.csv"), col_names = TRUE)
+write_csv(ant_locs_vessels, here("cleaned_data", "ant_locs_vessels.csv"), col_names = TRUE)
+```
+
+# Assessing bias in data
+
+### Bias in observed ships
+To understand how comprehensive my data are, I compare the data from Informa Ltd to known ships and vice versa. The comparison was done outside R. The vessel names and identifying numbers are not always consistent across the lists and required manual checking. A column, known_vessel, with Y or N was included in the vessels_verified and additional_vessels_verified to indicate whether the vessel appeared on any of the COMNAP, CCAMLR and IAATO lists, and additional columns to indicate which list.
+
+Firstly, how many ships on my list are "known" vessels, i.e. how many also appear on lists from CCAMLR, IAATO and COMNAP. The CCAMLR list is of the vessels licensed to fish within the CCAMLR area, so other vessels associated with fishing (e.g. reefers used for transshipments at sea) would not appear on CCAMLR lists, even if authorities within CCAMLR are aware that those vessels are active within the CCAMLR area. The IAATO vessels are vessels operated by IAATO members. This captures most, but not all, tourism in the region since private vessels or vessels that have a once-off voyage may seek permission to visit the region but may choose not to become IAATO members. In a similar fashion, the list of vessels available through COMNAP captures most of the ships used by National Operators, especially regular visitors, but countries are not required to report every vessel they use (e.g. for supply). 
+
+```{r SHIP BIAS - overlap with known vessels}
+vessels_main <- vessels_main %>%
+  mutate(known_vessel = case_when(comnap_list == "y" ~ "y",
+                                  iaato_list == "y" ~ "y",
+                                  ccamlr_list == "y" ~ "y",
+                                  TRUE ~ as.character(known_vessel)))
+vessels_known <- vessels_main %>%
+  filter(known_vessel == "y")
+length(unique(vessels_main$vessel_id))
+length(unique(vessels_known$vessel_id))
+```
+
+146 of the 255 (57%) vessels that visited the Southern Ocean are considered "known" vessels. Thus, 43% of vessels that visit the Southern Ocean, were 'unknown' vessels, whose activity  in the region is not readily or available and perhaps in some cases management authorities were unaware of. However, it does not mean that that these vessels were unauthorised to visit. For example, each year a number of private yachts are authorised to visit for tourism by various member states. (estimates in McCarthy2019 were based on publicly available sources, but included an estimate of private yachts both authorised and unauthorised).
+
+```{r SHIP BIAS - proportions of known vessels and different activity types}
+all_ships_proportions <- vessels_main %>%
+  group_by(activity_type) %>%
+  summarise(n_distinct(vessel_id))
+known_ships_proportions <- vessels_known %>%
+  group_by(activity_type) %>%
+  summarise(n_distinct(vessel_id))
+36 / 47 #research
+49 / 60 #tourism
+53 / 62 #fishing
+6 / 75 #supply
+2 / 11 #other
+47 / 36 #research
+60 / 49 #tourism
+62 / 53 #fishing
+75 / 6 #supply
+11 / 2 #other
+```
+Activity type | known ships | all ships     | Percentage known  
+--------------|-------------|---------------|-------------------
+Research      | 36          | 47            | 77
+Tourism       | 49          | 60            | 82
+Fishing       | 53          | 62            | 85
+Supply        | 6           | 75            | 8
+Other         | 2           | 11            | 18
+
+Satellite AIS data reveal the number of ships active in the Southern ocean between 2014-2018 is far greater than publicly available resources indicated. Supply ship, in particular visit the Southern Ocean at higher rates than expected. It should be mentioned that for certain shipping routes, the shortest path does cross south of 60degS so some ships may not really be visiting Antarctica even in found south of -60.
+
+But what about the ships that visit within 5km of the coastline? How do they compare by activity type?
+```{r SHIP BIAS - vessels within 5km}
+all_ships_5km_proportions <- vessels_so_coast %>%
+  group_by(activity_type) %>%
+  summarise(n_distinct(vessel_id))
+known_ships_5km_proportions <- vessels_so_coast %>%
+  filter(known_vessel == "y") %>%
+  group_by(activity_type) %>%
+  summarise(n_distinct(vessel_id))
+26 / 29 #research
+48 / 55 #tourism
+17 / 21 #fishing
+4 / 49 #supply
+1 / 3 #other
+29 / 26 #research
+55 / 48 #tourism
+21 / 17 #fishing
+49 / 4 #supply
+3 / 1 #other
+```
+
+Ships within 5km of coastline
+
+Activity type | known ships | all ships     | Percentage known  
+--------------|-------------|---------------|-------------------
+Research      | 26          | 29            | 90
+Tourism       | 48          | 55            | 87
+Fishing       | 17          | 21            | 81
+Supply        | 4           | 48            | 8
+Other         | 1           | 3             | 33
+
+For ships observed within 5km of the Antarctic coastline, and perhaps at risk of transferring non-native species to the coastal Antarctic environment, publicly available lists underestimated the number of ships with 8-90% of ships classed as known, depending on activity type. Again, supply ships are particularly unrepresented in publicly available lists. However, this does not mean that they were unauthorised or their activity known by no management organisation or Treaty party.
+
+And what about the ships that end up in my network analyses?
+```{r SHIP BIAS - vessels in Antarctic locations}
+all_ships_ant_locs_proportions <- ant_locs_vessels %>%
+  group_by(activity_type) %>%
+  summarise(n_distinct(vessel_id))
+known_ships_ant_locs_proportions <- ant_locs_vessels %>%
+  filter(known_vessel == "y") %>%
+  group_by(activity_type) %>%
+  summarise(n_distinct(vessel_id))
+25 / 30 #fishing
+49 / 56 #tourism
+27 / 30 #research
+5 / 50 #supply
+1 / 4 #other
+30 / 25 #fishing
+56 / 49 #tourism
+30 / 27 #research
+50 / 5 #supply
+4 / 1 #other
+```
+Activity type | known ships | all ships     | Percentage known  
+--------------|-------------|---------------|-------------------
+Research      | 27          | 30            | 90
+Tourism       | 49          | 56            | 88
+Fishing       | 25          | 30            | 83
+Supply        | 5           | 50            | 10
+Other         | 1           | 4             | 25
+
+For ships observed within the Antarctic locations that are used in the network, perhaps at particular risk of transferring non-native species to the coastal Antarctic environment, publicly available lists included 10-90% of ships, depending on activity type. Again, supply ships are particularly unrepresented in publicly available lists and research/National Operator activity is the best covered in known lists.
+
+So, we know that using satellite AIS data reveal substantially more ships that publicly available estimates (e.g. used in McCarthy2019). However, there are also ships that are present in those publicly available lists that are not present in the satellite AIS data. The lists available through IAATO and COMNAP are not for specific years or seasons, therefore there may be some ships on those lists that did not intend to visit during the period in question. Any ships on those lists that were not built or operational during 2014-2018 were removed from the comparison. CCAMLR licences fishing vessels for seasons that overlap calendar years, thus some vessels licenced for 2013/14 or 2018/19 might not been active during the 2014-2018 calendar years and would not be expected to be observed in the satellite AIS data. In addition, the CCAMLR area is greater than the Antarctic Treaty Area. It is divided into Areas and sub-Areas, some of which are entirely north of -60deg and others that are partially south of -60deg. Any vessels that were only licenced for areas north of -60deg were removed from the comparison (after first checking that they were also not present south of -60deg). Vessels licenced for areas that were largely north of -60deg but extended south of -60 were included in the comparison, but it is very possible (perhaps even likely) that the vessels did not travel south of -60 during their course of activity.
+
+CCAMLR licenced 75 ships to fish within the CCAMLR area for the season 2013/14 to 2018/19. Of those, 9 ships were not licensed to fish in areas south of 60 degrees and were not observed south of 60 degrees in the Informa data. 10 ships of the 66 that were licensed to fish in divisions that extend south of 60 deg were not present in the Informa data. 80% of licenced fishing vessels were present in fishing vessels observed in the AIS data.
+
+IAATO had at least 73 member vessels from 2014-2018. Of those, 23 were sailing vessels that are not in the Informa data. 49 IAATO member vessels were in the Informa data. Therefore 67% known IAATO member vessels are present in the satellite AIS data. However, given the regulations on IMO numbers and AIS requirements, the lack of sailing vessels in the AIS data is expected. In addition, non-IAATO vessels are generally authorised by a Treaty party and were probably known about when they visited.
+
+7 of 45 (15%) ships on the COMNAP list are not on the Informa list (85% of ships are present). However, this does not necessarily mean that the ships visited and were not observed, rather that national operators indicated that they intendt to use these ships for their Antarctic operations.
+
+### Known vs Unknown vessels visiting for multiple or single years
+
+How many of the known vessels are regular visitors? For different activity types?
+```{r}
+ships_visits_all <- vessels_main %>%
+  filter(year != 2013) %>%
+  group_by(vessel_id) %>%
+  distinct(year) %>%
+  count() %>%
+  group_by(n) %>%
+  count() %>%
+  rename(years_visited = n, n_ships = nn) %>%
+  ungroup() %>%
+  mutate(percentage = n_ships / sum(n_ships) * 100)
+kable(ships_visits_all) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  footnote(general = "All vessels: numbers and proportions of all ships that
+           visited Antarctica during 1, 2, 3, 4, or 5 calendar years")
+
+ships_visits_known <- vessels_known %>%
+  filter(year != 2013) %>%
+  group_by(vessel_id) %>%
+  distinct(year) %>%
+  count() %>%
+  group_by(n) %>%
+  count() %>%
+  rename(years_visited = n, n_ships = nn) %>%
+  ungroup() %>%
+  mutate(percentage = n_ships / sum(n_ships) * 100)
+kable(ships_visits_known) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  footnote(general = "Known vessels: numbers and proportions of ships present on COMNAP,
+           IAATO and CCAMLR lists that visited Antarctica during 1, 2, 3, 4, or 5 calendar years")
+```
+A higher proportion of known ships visited multiple years. Perhaps unsurprisingly, the vessels that do not appear on publicly available lists were not regular visitors during 2014-2018.
+
+## Ship Observation bias at select locations
+
+Do the satellite AIS data really reflect verified observations from station operators and other observers? A number of possible locations were identified (listed below). Only observations from the first location Bahia Fildes/Maxwell Bay on King George Island were compared as this is the busiest area in my data. Due to the format that the data were shared in and slightly different names or spellings of ships, the comparison was performed manually outside R. Details are contained in the manuscript file (in Scrivener).
+
+Possible Locations:  
+1. Bahia Fildes, data supplied by Dr Christina Braun, Jena  
+2. Rothera, British ANtarctic Survey Station - data supplied by BAS station Ops  
+3. Signy Island, BAS stations - data as above  
+4. Scott Base - emailed Antarctica New Zealand  
+5. Australian stations - in contact with AADC/AAD and waiting to hear back from them  
+
+
+# Density maps
+Density maps to show the areas with the most location recordings. These have not been adjusted for the frequency of position reports. For specific locations, the Antarctic port calls are a much better reflection on the number of visits.
+```{r DENSITY MAPS}
+world <- map_data("world")
+worldmap <- ggplot(world, aes(x = long, y = lat, group = group)) +
+  geom_polygon(color = "black", fill = "lightgray", size = 0.2) +
+  scale_y_continuous(breaks = (-2:2) * 30) +
+  scale_x_continuous(breaks = (-4:4) * 45)
+
+sightings_main <- trips_main %>%
+  filter(lat_2 <= -60)
+
+density <- worldmap +
+  coord_fixed(1.9, ylim = c(-89, -60)) +
+  stat_binhex(data = sightings_main, aes(x = lon_2, y = lat_2, group = "vessel_id"),
+              geom = "hex",
+              size = 0.05,
+              bins = 100,
+              show.legend = TRUE) +
+  scale_fill_viridis() +
+  scale_alpha_continuous(range = c(0.2, 1), guide = "none") +
+  labs(x = "Longitude", y = "Latitude") +
+  guides(fill = guide_colorbar(title = "Number of position reports",
+                               direction = "horizontal",
+                               title.position = "bottom",
+                               barwidth = 20,
+                               barheight = 0.5)) +
+  theme(legend.position = "bottom")
+plot(density)
+ggsave2(here("outputs", "Clean_stage5InformaDensity.pdf"))
+```
+
+Zoom in on the Antarctic Peninsula
+
+```{r}
+density2 <- worldmap +
+  coord_fixed(1.9, ylim = c(-70, -60), xlim = c(-80, -40)) +
+  stat_binhex(data = sightings_main, aes(x = lon_2, y = lat_2, group = "vessel_id"),
+              geom = "hex",
+              size = 0.001,
+              bins = 900,
+              show.legend = TRUE) +
+  scale_fill_viridis() +
+  scale_alpha_continuous(range = c(0.2, 1), guide = "none") +
+  labs(x = "Longitude", y = "Latitude") +
+  guides(fill = guide_colorbar(title = "Number of position reports",
+                               direction = "horizontal",
+                               title.position = "bottom",
+                               barwidth = 20, barheight = 0.5)) +
+  theme(legend.position = "bottom")
+plot(density2)
+ggsave(here("outputs", "Clean_stage5DensityAntarcticPeninsula.pdf"))
+
+map_density_multiplot <- plot_grid(density, density2, labels = c("A", "B"),
+                                   nrow = 2, rel_heights = c(1, 1.5))
+plot(map_density_multiplot)
+save_plot(here("outputs", "map_density_multiplot_stage5.pdf"),
+          map_density_multiplot,
+          ncol = 1,
+          nrow = 2,
+          base_aspect_ratio = 1.6)
+```

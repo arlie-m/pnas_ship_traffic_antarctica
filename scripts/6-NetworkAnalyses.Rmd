@@ -1,0 +1,1309 @@
+---
+title: "6-Network Analysis"
+author: "Arlie McCarthy"
+date: "25/03/2021"
+output: 
+  html_document: default
+always_allow_html: true
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = "workflow") })
+---
+# Summary and set-up
+
+The analysis of ship activity and use of networks stems from the following aims to:
+
+  	•	Reveal the extent of the ship network connecting Antarctica to the rest of the world, in light of assumptions that activity is higher in certain locations (Antarctic Peninsula) and that 'Antarctic Gateway' ports are the primary conduits through which ships travel to the Southern Ocean.
+    	⁃	For example, are official gateway cities really the "main international points of departure to and from the Antarctic region"? (https://www.circlesofsustainability.org/projects/antarctic-cities/)
+    	⁃	Are the numbers of ships and voyages from Temperate South America (much) greater than to/from other areas of Antarctica and other parts of the world? (what magnitude of difference?)
+	•	Quantify the intensity of ship activity in coastal Antarctic locations, to identify areas with higher pressure from human activity, including potential propagule pressure of non-native species. (AKA where do we need to start looking for invasive species?)
+    	⁃	different spatial scales of maps showing number of visits to each place
+    	⁃	table of most visited places/rank antarctic ports and ecoregions based on number of ships and also cumulative ship time spent in those places.
+	•	Compare the activity of fishing, tourism and research/national operations spatially and temporally (risk of introduction for different industries)
+    	⁃	essentially do all the above, but for different activity types and compare them. E.g. do the Gateway ports reflect all activity types?
+	•	Identify key ports and ecological regions (Marine Ecoregions of the World as defined by [@Spalding2007]) around the world that are likely to contribute most to introductions, based on their connectivity to Antarctic locations
+
+Packages and functions used in this script.
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(sf)
+library(sp)
+library(janitor)
+library(lubridate)
+library(here)
+library(mapview)
+library(igraph)
+library(tidygraph)
+library(ggmap)
+library(ggraph)
+library(mapdata)
+library(maps)
+library(rnaturalearth)
+library(kableExtra)
+library(ggsci)
+library(cowplot)
+
+source(here("scripts", "functions", "make_networks.R"))
+source(here("scripts", "functions", "make_world_plots.R"))
+source(here("scripts", "functions", "make_eco_plots.R"))
+source(here("scripts", "functions", "gateway_importance.R"))
+source(here("scripts", "functions", "gateway_regions.R"))
+source(here("scripts", "functions", "make_antarctic_maps.R"))
+source(here("scripts", "functions", "make_antarctic_eco_maps.R"))
+source(here("scripts", "functions", "make_scotia_maps.R"))
+source(here("scripts", "functions", "antarctic_risk.R"))
+```
+
+# Import master files for all ship networks
+
+Files are imported as lists so that they can be easily used together. Most analyses are performed on networks for all ships and for each activity type so I wrote functions that allow me to do the analyses on all networks in a list. 
+
+```{r IMPORT EDGE LIST AND NODE LIST FILES, message=FALSE}
+#Port network edge lists
+edge_lists <- list(
+  edge_list_all = read_csv(here("cleaned_data", "edge_list.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  edge_list_fishing = read_csv(here("cleaned_data", "edge_list_fishing.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  edge_list_tourism = read_csv(here("cleaned_data", "edge_list_tourism.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  edge_list_research = read_csv(here("cleaned_data", "edge_list_research.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  edge_list_supply = read_csv(here("cleaned_data", "edge_list_supply.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  edge_list_other = read_csv(here("cleaned_data", "edge_list_other.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  )
+)
+nodes_lists <- list(
+  nodes_list = read_csv(here("cleaned_data", "nodes_list.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  nodes_list_fishing = read_csv(here("cleaned_data", "nodes_list_fishing.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  nodes_list_tourism = read_csv(here("cleaned_data", "nodes_list_tourism.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  nodes_list_research = read_csv(here("cleaned_data", "nodes_list_research.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  nodes_list_supply = read_csv(here("cleaned_data", "nodes_list_supply.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  nodes_list_other = read_csv(here("cleaned_data", "nodes_list_other.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  )
+)
+
+#Ecoregion edge lists
+edge_eco_lists <- list(
+  edge_list_eco = read_csv(here("cleaned_data", "edge_list_eco.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  edge_list_eco_fishing = read_csv(here("cleaned_data", "edge_list_eco_fishing.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  edge_list_eco_tourism = read_csv(here("cleaned_data", "edge_list_eco_tourism.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  edge_list_eco_research = read_csv(here("cleaned_data", "edge_list_eco_research.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  edge_list_eco_supply = read_csv(here("cleaned_data", "edge_list_eco_supply.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  edge_list_eco_other = read_csv(here("cleaned_data", "edge_list_eco_other.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  )
+)
+
+#Ecoregion node lists
+nodes_eco_lists <- list(
+  nodes_list_ecoregion = read_csv(here("cleaned_data", "nodes_list_ecoregion.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  nodes_list_eco_fishing = read_csv(here("cleaned_data", "nodes_list_eco_fishing.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  nodes_list_eco_tourism = read_csv(here("cleaned_data", "nodes_list_eco_tourism.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  nodes_list_eco_research = read_csv(here("cleaned_data", "nodes_list_eco_research.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  nodes_list_eco_supply = read_csv(here("cleaned_data", "nodes_list_eco_supply.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  ),
+  nodes_list_eco_other = read_csv(here("cleaned_data", "nodes_list_eco_other.csv"),
+    col_types = cols(
+      mean_time = col_number(),
+      median_time = col_number(),
+      total_time = col_number()
+    )
+  )
+)
+
+#Marine ecoregions of the world
+MEOW <- st_read(here::here("data", "MEOW", "meow_ecos.shp")) %>%
+  clean_names()
+```
+## Making the networks
+
+I created a function (`make_networks`) that does the final preparation for and creates directed networks using tidygraph for both the port-to-port networks and ecoregion networks. The function also calculates the centrality measures that will be used later on. 
+
+```{r}
+port_networks <- make_networks(edge_lists, nodes_lists, nodes_are_ports = TRUE)
+ecoregion_networks <- make_networks(edge_eco_lists, nodes_eco_lists, nodes_are_ports = FALSE)
+```
+
+### First look at the port networks
+
+```{r}
+port_networks$all
+port_networks$fishing
+port_networks$tourism
+port_networks$research
+port_networks$supply
+port_networks$other
+```
+
+# Port networks
+
+## Port network metrics
+
+Average Degree
+```{r}
+# Average degree
+port_networks$all %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(strength_total))
+port_networks$fishing %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(strength_total))
+port_networks$tourism %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(strength_total))
+port_networks$research %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(strength_total))
+port_networks$supply %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(strength_total))
+port_networks$other %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(strength_total))
+```
+
+
+Average betweenness centrality
+```{r}
+# Average betweenness centrality
+port_networks$all %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(betweenness_centrality))
+port_networks$fishing %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(betweenness_centrality))
+port_networks$tourism %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(betweenness_centrality))
+port_networks$research %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(betweenness_centrality))
+port_networks$supply %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(betweenness_centrality))
+port_networks$other %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(betweenness_centrality))
+```
+Average clustering coefficient
+
+```{r}
+port_networks$all %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(clust_co, na.rm = TRUE))
+port_networks$fishing %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(clust_co, na.rm = TRUE))
+port_networks$tourism %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(clust_co, na.rm = TRUE))
+port_networks$research %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(clust_co, na.rm = TRUE))
+port_networks$supply %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(clust_co, na.rm = TRUE))
+port_networks$other %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  summarise(mean(clust_co, na.rm = TRUE))
+```
+
+Average path length
+```{r}
+average.path.length(port_networks$all, directed=TRUE)
+average.path.length(port_networks$fishing, directed=TRUE)
+average.path.length(port_networks$tourism, directed=TRUE)
+average.path.length(port_networks$research, directed=TRUE)
+average.path.length(port_networks$supply, directed=TRUE)
+average.path.length(port_networks$other, directed=TRUE)
+```
+Edge density
+```{r}
+edge_density(port_networks$all, loops = FALSE)
+edge_density(port_networks$fishing, loops = FALSE)
+edge_density(port_networks$tourism, loops = FALSE)
+edge_density(port_networks$research, loops = FALSE)
+edge_density(port_networks$supply, loops = FALSE)
+edge_density(port_networks$other, loops = FALSE)
+```
+
+number of cliques (fully connected clusters)
+```{r}
+count_components(port_networks$all, mode = "strong")
+count_components(port_networks$all, mode = "weak")
+
+count_components(port_networks$fishing, mode = "strong")
+count_components(port_networks$fishing, mode = "weak")
+
+count_components(port_networks$tourism, mode = "strong")
+count_components(port_networks$tourism, mode = "weak")
+
+count_components(port_networks$research, mode = "strong")
+count_components(port_networks$research, mode = "weak")
+
+count_components(port_networks$supply, mode = "strong")
+count_components(port_networks$supply, mode = "weak")
+
+count_components(port_networks$other, mode = "strong")
+count_components(port_networks$other, mode = "weak")
+```
+
+Closer look at clusters and membership in those clusters, for each activity types.
+```{r}
+port_networks$all <- port_networks$all %>%
+  activate(nodes) %>%
+  mutate(cluster = membership(cluster_infomap(port_networks$all)))
+
+port_networks$all %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  dplyr::select(cluster) %>%
+  distinct() %>%
+  count()
+port_networks$all %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  dplyr::select(cluster) %>%
+  group_by(cluster) %>%
+  count()
+
+port_networks$fishing <- port_networks$fishing %>%
+  activate(nodes) %>%
+  mutate(cluster = membership(cluster_infomap(port_networks$fishing)))
+port_networks$fishing %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  dplyr::select(cluster) %>%
+  distinct() %>%
+  count()
+port_networks$fishing %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  dplyr::select(cluster) %>%
+  group_by(cluster) %>%
+  count()
+
+port_networks$tourism <- port_networks$tourism %>%
+  activate(nodes) %>%
+  mutate(cluster = membership(cluster_infomap(port_networks$tourism)))
+port_networks$tourism %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  dplyr::select(cluster) %>%
+  distinct() %>%
+  count()
+port_networks$tourism %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  dplyr::select(cluster) %>%
+  group_by(cluster) %>%
+  count()
+
+port_networks$research <- port_networks$research %>%
+  activate(nodes) %>%
+  mutate(cluster = port_networks$all <- membership(cluster_infomap(port_networks$research)))
+port_networks$research %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  dplyr::select(cluster) %>%
+  distinct() %>%
+  count()
+port_networks$research %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  dplyr::select(cluster) %>%
+  group_by(cluster) %>%
+  count()
+
+port_networks$supply <- port_networks$supply %>%
+  activate(nodes) %>%
+  mutate(cluster = membership(cluster_infomap(port_networks$supply)))
+port_networks$supply %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  dplyr::select(cluster) %>%
+  distinct() %>%
+  count()
+port_networks$supply %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  dplyr::select(cluster) %>%
+  group_by(cluster) %>%
+  count()
+
+port_networks$other <- port_networks$other %>%
+  activate(nodes) %>%
+  mutate(cluster = membership(cluster_infomap(port_networks$other)))
+port_networks$other %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  dplyr::select(cluster) %>%
+  distinct() %>%
+  count()
+port_networks$other %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  dplyr::select(cluster) %>%
+  group_by(cluster) %>%
+  count()
+```
+
+Number of ports outside Antarctica. 
+
+```{r}
+port_networks$all %>%
+  activate(nodes) %>% 
+  as_tibble() %>% 
+  filter(realm != "Southern Ocean") %>% 
+  count()
+
+port_networks$all %>%
+  activate(nodes) %>% 
+  as_tibble() %>% 
+  filter(realm == "Southern Ocean") %>% 
+  count()
+```
+
+## World maps of all the port networks
+It is clear that Antarctic vessels really do travel the world and that activity types do  differ a little. There also appears to be substantial traffic between Europe and South America through the Atlantic
+
+```{r}
+world_port_maps <- make_plots(list_of_networks = port_networks)
+plot(world_port_maps$all)
+```
+
+And for each activity type
+
+```{r}
+plot(world_port_maps$fishing)
+plot(world_port_maps$tourism)
+plot(world_port_maps$research)
+plot(world_port_maps$supply)
+plot(world_port_maps$other)
+```
+
+
+
+# Ecoregion graphs
+
+First, I generate points to connect ecoregions, rather than plotting polygons. 
+To do this I need to take the polygon geometry from the MEOW objects and find the central point of the polygon
+```{r}
+eco_points <- st_point_on_surface(MEOW) %>% 
+      st_transform(crs = "+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m no_defs")
+eco_points_variables <- do.call(rbind, st_geometry(eco_points)) %>%
+  as_tibble() %>%
+  setNames(c("x_node", "y_node"))
+eco_points_coords <- st_point_on_surface(MEOW) %>% 
+      st_transform(crs = 4326)
+eco_points_variables_coords <- do.call(rbind, st_geometry(eco_points_coords)) %>%
+  as_tibble() %>%
+  setNames(c("longitude", "latitude"))
+eco_points <- eco_points %>%
+  add_column(
+    x_node = eco_points_variables$x_node,
+    y_node = eco_points_variables$y_node,
+    longitude = eco_points_variables_coords$longitude,
+    latitude = eco_points_variables_coords$latitude
+  )
+eco_points$geometry <- NULL
+```
+
+Then I create the networks and plots for them. Just as I did for the port network. I am less interested in the density, centrality etc measure of these networks so I haven't calculated them for the ecoregion networks.
+```{r}
+world_eco_maps <- make_eco_plots(
+  list_of_networks = ecoregion_networks,
+  points_for_layout = eco_points
+)
+plot(world_eco_maps$all)
+plot(world_eco_maps$fishing)
+plot(world_eco_maps$tourism)
+plot(world_eco_maps$research)
+plot(world_eco_maps$supply)
+plot(world_eco_maps$other)
+```
+
+# Aim 1: testing assumptions on activity and importance of ports
+
+## Gateway Cities 
+First, are official Gateway cities the main ports of departure for ships going to Antarctica? To find this out I need to count the number of ships going to Antarctica from ANY ports with direct links to Antarctic locations.
+
+I created a function to a subset the port_network graph so that it only has edges TO the Southern Ocean and used the subsetted graph re-calculate out-strength. Out-strength now reflects the number of voyages from that port to the Southern Ocean within my 5-year time period. This was repeated for each of the different activity types. The function then creates a table of the gateway ports ranked from highest to lowest by number of departures.
+
+```{r}
+gateway_ports_results <- gateway_importance(port_networks)
+gateway_ports_results$all
+```
+In fact, 58 ports within the port-based network were the 'last port of call' for ships travelling to the Southern Ocean. 33 of those ports had more than one ship depart for the Southern Ocean during the 5-year period. The official gateway cities are 1st (Ushuaia), 3rd (Punta Arenas), 5th (Cape Town), 8th (Hobart) and 9th (Lyttleton/Christchurch) on the list of 'last ports of call.' Each gateway city is the highest rank city for its country and they are typically cultural and logistical hubs that arrange Antarctic travel. For example, a tourist itinerary may have passengers embark on their cruise in Ushuaia (Argentina), travel to Puerto Williams (Chile), on to the Falkland Islands/Islas Malvinas where they make a number of stops before heading to Antarctica. In this scenario, the last port of call might be Stanley Harbour, but the point of departure for passengers was Ushuaia. Nonetheless, from an impact and biosecurity perspective, ensuring that measures are in place at all major ports of departure is essential. 
+
+75 ports have direct links to locations in Antarctica, 17 acting only as return ports and 15 acting only as departure ports. As shown in table produced below.
+```{r}
+port_networks$all %>% 
+  activate(edges) %>% 
+  convert(to_subgraph, to_realm == "Southern Ocean" | from_realm == "Southern Ocean", subset_by = "edges") %>% 
+  activate(nodes) %>% 
+  mutate(isolated = node_is_isolated()) %>% 
+  convert(to_subgraph, isolated == FALSE, subset_by = "nodes") %>% 
+  mutate(strength_out = centrality_degree(mode='out', weights = n_voyages, normalized = T)) %>%
+  mutate(strength_in = centrality_degree(mode='in', weights = n_voyages, normalized = T)) %>% 
+  as_tibble() %>% 
+  filter(realm != "Southern Ocean") %>% 
+  kable(format = "html", row.names = TRUE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                    full_width = F,
+                    fixed_thead = TRUE,
+                    font_size = 11,
+                    row_label_position = "l") %>%
+  scroll_box(height = "300px")
+```
+
+
+Let's take a closer look at the 58 Gateway ports (summary information in the paragraph above).
+```{r}
+#I filter the port network to only include ports that were the origin for had
+#at least one voyage to the Southern Ocean
+gateway_test <- port_networks$all %>%
+  activate(edges) %>%
+  filter(to_realm == "Southern Ocean") %>%
+  activate(nodes) %>%
+  mutate(strength_out = centrality_degree(mode = "out", weights = n_voyages)) %>%
+  filter(strength_out > 0)
+#I create a subgraph, converted to a tibble showing those ports and their attributes
+gateway_nodes <- gateway_test %>%
+  activate(nodes) %>%
+  filter(realm != "Southern Ocean") %>%
+  arrange(desc(strength_out)) %>%
+  dplyr::select(place, country, ecoregion, province, realm, strength_out, everything()) %>%
+  ungroup() %>%
+  as_tibble() %>%
+  mutate(total_voyages_to = sum(strength_out)) %>%
+  mutate(pcent = strength_out / total_voyages_to * 100)
+
+gateway_nodes %>%
+  dplyr::select(place, country, strength_out, total_voyages_to, pcent, ecoregion, province, realm) %>% 
+  kable(format = "html", row.names = TRUE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                    full_width = F,
+                    fixed_thead = TRUE,
+                    font_size = 11,
+                    row_label_position = "l") %>%
+  scroll_box(height = "500px")
+```
+
+### What about the recognised Gateway cities?
+Here I just look at the 5 'official' cities.
+```{r}
+#percentage of activity through all official gateways
+gateway_nodes %>%
+  dplyr::select(place, country, strength_out, total_voyages_to, pcent, ecoregion, province, realm) %>%
+  filter(place == "Ushuaia" |
+           place == "Punta Arenas" |
+           place == "Cape Town" |
+           place == "Hobart" |
+           place == "Lyttelton") %>%
+  summarise(gateway_cities_pcent = sum(pcent))
+
+#percentage of activity through official each gateway
+gateway_nodes %>%
+  dplyr::select(place, country, strength_out, total_voyages_to, pcent, ecoregion, province, realm) %>%
+  filter(place == "Ushuaia" |
+           place == "Punta Arenas" |
+           place == "Cape Town" |
+           place == "Hobart" |
+           place == "Lyttelton")
+
+#percentage of activity through Punta Arenas and Ushuaia
+gateway_nodes %>%
+  dplyr::select(place, country, strength_out, total_voyages_to, pcent, ecoregion, province, realm) %>%
+  filter(place == "Ushuaia" | place == "Punta Arenas") %>%
+  summarise(gateway_cities_pcent = sum(pcent))
+```
+
+#### Summary information about gateway ports by country. 
+
+Relevant to the consideration of where biosecurity measures could be implemented to effectively reduce transfer of non-native species.
+```{r}
+#number of gateway ports per country
+gateway_nodes %>%
+  group_by(country) %>%
+  count() %>% 
+  arrange(desc(n))
+#Number of gateway ports per country with strength out greater than 1
+gateway_nodes %>%
+  filter(strength_out > 1) %>%
+  group_by(country) %>%
+  count() %>% 
+  arrange(desc(n))
+#Top 10 together
+gateway_nodes %>%
+  arrange(desc(pcent)) %>%
+  dplyr::select(place, country, strength_out, total_voyages_to, pcent, ecoregion, province, realm) %>%
+  slice(1:10) %>%
+  summarise(gateway_cities_pcent = sum(pcent))
+#Top 10 ports
+gateway_nodes %>%
+  arrange(desc(pcent)) %>%
+  dplyr::select(place, country, strength_out, total_voyages_to, pcent, ecoregion, province, realm) %>%
+  slice(1:10)
+```
+
+#### For what proportion of voyages do they act as 'last ports of call'?
+```{r}
+gateway_nodes %>%
+  arrange(desc(pcent)) %>%
+  dplyr::select(place, country, strength_out, total_voyages_to, pcent, ecoregion, province, realm) %>%
+  filter(country == "Argentina" |
+           country == "Chile" |
+           country == "Falkland Islands" |
+           country == "South Africa" |
+           country == "Australia" |
+           country == "New Zealand" |
+           country == "Uruguay") %>%
+  summarise(gateway_cities_pcent = sum(pcent))
+
+gateway_nodes %>%
+  dplyr::select(place, country, strength_out, pcent) %>%
+  mutate(pcent = sprintf("%0.2f", pcent))
+```
+
+## Gateway Ports for different activities
+
+### Fishing
+The two most important departure ports for fishing vessels that visit select coastal Antarctic locations are Punta Arenas in Chile and Cape Town in South Africa, both recognised as Gateway Cities. However, no other Gateway City was a departure point for fishing vessesl that visited the Antarctic nodes. Many fishing vessesl, and much fishing activity, occurrs offshore so the importance of ports that launch vessels to the Southern Ocean that did not visit the Antarctic 'ports' could be quite different.
+
+```{r}
+gateway_ports_results$fishing
+gateway_fishing <- port_networks$fishing %>%
+  activate(edges) %>%
+  filter(to_realm == "Southern Ocean") %>%
+  activate(nodes) %>%
+  mutate(strength_out = centrality_degree(mode = "out", weights = n_voyages)) %>%
+  filter(strength_out > 0)
+gateway_nodes_fishing <- gateway_fishing %>%
+  activate(nodes) %>%
+  filter(realm != "Southern Ocean") %>%
+  arrange(desc(strength_out)) %>%
+  dplyr::select(place, country, ecoregion, province, realm, strength_out, everything()) %>%
+  ungroup() %>%
+  as_tibble() %>%
+  mutate(total_voyages_to = sum(strength_out)) %>%
+  mutate(pcent = strength_out / total_voyages_to * 100)
+
+gateway_nodes_fishing %>%
+  dplyr::select(place, country, strength_out, pcent) %>%
+  mutate(pcent = sprintf("%0.2f", pcent))
+```
+### Tourism
+Tourism tends to visit islands and continents which are included as Antarctic nodes. Ushuaia, Argentina is a recognised Gateway City and had 691 voyages direct to Antarctic locations, 3.5 times more than the next most important port. Stanley Harbour in the Falkland Islands/Islas Malvinas and Puerto Williams in Chile were the next most important ports, with almost an order of mangitude more departures than the the next ports;  Bluff in New Zealand, Punta Arenas in Chile, Montevideo in Uruguay and Port William in the Falkland Islands/Islas Malvinas. Tourist intineraries, in particlar, involve frequent stops at places of interest. So while the official Gateway Cities are relatively poorly represented in this list (with the exception of Ushuaia), tourists are still likely to embark or travel through Gatway Cities to reach Antarctica. For example, a cruise might stop briefly at Puerto Williams for sightseeing but the passengers may have joined the cruise in Punta Arenas.
+
+```{r}
+gateway_ports_results$tourism
+gateway_tourism <- port_networks$tourism %>%
+  activate(edges) %>%
+  filter(to_realm == "Southern Ocean") %>%
+  activate(nodes) %>%
+  mutate(strength_out = centrality_degree(mode = "out", weights = n_voyages)) %>%
+  filter(strength_out > 0)
+gateway_nodes_tourism <- gateway_tourism %>%
+  activate(nodes) %>%
+  filter(realm != "Southern Ocean") %>%
+  arrange(desc(strength_out)) %>%
+  dplyr::select(place, country, ecoregion, province, realm, strength_out, everything()) %>%
+  ungroup() %>%
+  as_tibble() %>%
+  mutate(total_voyages_to = sum(strength_out)) %>%
+  mutate(pcent = strength_out / total_voyages_to * 100)
+
+gateway_nodes_tourism %>%
+  dplyr::select(place, country, strength_out, pcent) %>%
+  mutate(pcent = sprintf("%0.2f", pcent))
+```
+### Research
+Official Gateway Cities quite accurately reflect the most important departure ports for research vessels and national operations. This is perhaps unsurprising, since it is the nations active in Antarctic reserach that have put forward their cities as suggested Gateways. Gateway Cities make up 5 of the top 6 ports for research activity, joined by Mare Harbour in the Falkland Islands/Islas Malvinas. 
+
+```{r}
+gateway_ports_results$research
+gateway_research <- port_networks$research %>%
+  activate(edges) %>%
+  filter(to_realm == "Southern Ocean") %>%
+  activate(nodes) %>%
+  mutate(strength_out = centrality_degree(mode = "out", weights = n_voyages)) %>%
+  filter(strength_out > 0)
+gateway_nodes_research <- gateway_research %>%
+  activate(nodes) %>%
+  filter(realm != "Southern Ocean") %>%
+  arrange(desc(strength_out)) %>%
+  dplyr::select(place, country, ecoregion, province, realm, strength_out, everything()) %>%
+  ungroup() %>%
+  as_tibble() %>%
+  mutate(total_voyages_to = sum(strength_out)) %>%
+  mutate(pcent = strength_out / total_voyages_to * 100)
+
+gateway_nodes_research %>%
+  dplyr::select(place, country, strength_out, pcent) %>%
+  mutate(pcent = sprintf("%0.2f", pcent))
+```
+### Supply
+Supply ships going to coastal Antarctic locations depart from a wide range of ports, primarily in Temperate South America. Of the Gateway Cities, Punta Arenas had the most departures. 
+
+
+```{r}
+gateway_ports_results$supply
+gateway_supply <- port_networks$supply %>%
+  activate(edges) %>%
+  filter(to_realm == "Southern Ocean") %>%
+  activate(nodes) %>%
+  mutate(strength_out = centrality_degree(mode = "out", weights = n_voyages)) %>%
+  filter(strength_out > 0)
+gateway_nodes_supply <- gateway_supply %>%
+  activate(nodes) %>%
+  filter(realm != "Southern Ocean") %>%
+  arrange(desc(strength_out)) %>%
+  dplyr::select(place, country, ecoregion, province, realm, strength_out, everything()) %>%
+  ungroup() %>%
+  as_tibble() %>%
+  mutate(total_voyages_to = sum(strength_out)) %>%
+  mutate(pcent = strength_out / total_voyages_to * 100)
+
+gateway_nodes_supply %>%
+  dplyr::select(place, country, strength_out, pcent) %>%
+  mutate(pcent = sprintf("%0.2f", pcent))
+```
+### Other
+Very few ships and voyages fall into the category of "other", but most voyages by these ships left from either Punta Arenas or Ushuaia.
+```{r}
+gateway_ports_results$other
+gateway_other <- port_networks$other %>%
+  activate(edges) %>%
+  filter(to_realm == "Southern Ocean") %>%
+  activate(nodes) %>%
+  mutate(strength_out = centrality_degree(mode = "out", weights = n_voyages)) %>%
+  filter(strength_out > 0)
+gateway_nodes_other <- gateway_other %>%
+  activate(nodes) %>%
+  filter(realm != "Southern Ocean") %>%
+  arrange(desc(strength_out)) %>%
+  dplyr::select(place, country, ecoregion, province, realm, strength_out, everything()) %>%
+  ungroup() %>%
+  as_tibble() %>%
+  mutate(total_voyages_to = sum(strength_out)) %>%
+  mutate(pcent = strength_out / total_voyages_to * 100)
+
+gateway_nodes_other %>%
+  dplyr::select(place, country, strength_out, pcent) %>%
+  mutate(pcent = sprintf("%0.2f", pcent))
+```
+
+## Main regions of activity to and from Antarctic ecoregions
+
+```{r}
+gateway_region_results <- gateway_region_importance(list_of_eco_networks = ecoregion_networks, output_nodes = TRUE)
+gateway_region_results$all
+```
+```{r}
+ecoregion_networks$all %>% 
+  activate(nodes) %>% 
+  filter(realm == "Southern Ocean") %>% 
+  as_tibble() %>% 
+  summarise(total_voyages = sum(n_voyages))
+ecoregion_networks$all %>% 
+  activate(nodes) %>% 
+  filter(ecoregion == "South Shetland Islands" | ecoregion == "Antarctic Peninsula") %>% 
+  as_tibble() %>% 
+  summarise(total_voyages = sum(n_voyages))
+4547/5562
+```
+
+
+fishing
+
+```{r}
+gateway_region_results$fishing
+```
+
+tourism
+
+```{r}
+gateway_region_results$tourism
+```
+research
+
+```{r}
+gateway_region_results$research
+```
+supply
+
+```{r}
+gateway_region_results$supply
+```
+other
+
+```{r}
+gateway_region_results$other
+```
+How about the connections between ecoregions around the Southern Ocean?
+
+Whem looking at all ships, by far the strongest connections are between the Antarctic Peninsula, the South Shetland Islands and the Channels and Fjords of Southern Chile, which combined account for 5344 voyages between regions. In comparison, the connections with the next highest amount were between South Georgia and the Malvinas/Falklands and from there to the South Shetland Islands and the Antarctic Peninsula, yet combined they only account for 798 voyages between regions. The highest ranked connection between regions that do not include the Antarctic Peninsula, South Shetland Islands, South Georgia, Malvinas/Falklands, Channels and Fjords of Southern Chile or South Orkney Islands is between Bassian (Tasmania, Australia) and East Antarctic Wilkes Land (a vast area of East Antarctica that has numerous research stations). Even so, this connection accounted for 95 voyages in both directions, equivalent to 6% of the 1547 between Southern Chile/South America and the South Shetland Islands
+
+```{r}
+gateway_region_edge_results <- gateway_region_importance(list_of_eco_networks = ecoregion_networks, output_nodes = FALSE)
+gateway_region_edge_results$all
+```
+
+Now I extract some key summary numbers for the areas in summary paragraph above.
+```{r}
+primary_key_regions <- c("South Shetland Islands", "Antarctic Peninsula","Channels and Fjords of Southern Chile")
+secondary_key_regions <- c("Malvinas/Falklands", "South Georgia", "South Shetland Islands", "Antarctic Peninsula")
+ecoregion_networks$all %>%
+     activate(edges) %>% 
+     arrange(desc(n_voyages)) %>%
+     filter(from_ecoregion %in% primary_key_regions & to_ecoregion %in%       primary_key_regions) %>%
+    as_tibble() %>% 
+    summarise(primary_key_regions_total = sum(n_voyages))
+
+ecoregion_networks$all %>%
+     activate(edges) %>% 
+     arrange(desc(n_voyages)) %>%
+     filter(from_ecoregion %in% secondary_key_regions & to_ecoregion %in%       secondary_key_regions, 
+            move != "South Shetland Islands_Antarctic Peninsula",
+            move != "Antarctic Peninsula_South Shetland Islands"
+            ) %>%
+    as_tibble() %>% 
+    summarise(secondary_key_regions_total = sum(n_voyages))
+
+```
+
+The main pattern of important regions of activity is similar for fishing activity.
+```{r}
+gateway_region_edge_results$fishing
+```
+
+Tourism is even more centred on the area formed between southern SOuth America, Malvinas/Falklands, Scotia Arc and the Antarctic Peninsula. The connection with the highest number of voyages that is not within that are is from New Zealand to the Ross Sea, but only 14 tourist voyages to that route to Antarctica versus the 568 that travelled from the Chanels and Fjords of Southern Chile to the South Shetland Islands.
+
+```{r}
+gateway_region_edge_results$tourism
+```
+Although still heavily centered around the Antarctic Peninsula/South Shetland Islands/South America/Falklands/Scotia Arc area, research activity is a little more evenly spread. The connections between Bassian and East Antarctic Wilkes Land in both directions are rank 5th and 6th.
+
+```{r}
+gateway_region_edge_results$research
+```
+Supply ships, while also centered in the greater Antarctica Peninsula area and Scotia Arc are also a little more evenly spread than, e.g. tourism.
+
+```{r}
+gateway_region_edge_results$supply
+```
+The few ships that fell into the category of "other" were primarily not operating within the greater Antarctic Peninsula area, but in East Antarctica and the Weddell Sea.
+
+```{r}
+gateway_region_edge_results$other
+```
+### Ploting gateway activity around Antarctica
+
+For this section I map the activity in and around Antarctica and to/from places with direct links to the Southern Ocean, for both the port to port and ecoregion networks.
+
+Mapping Antarctic locations and their connections.
+```{r}
+port_maps_ant <- make_antarctic_maps(list_of_networks = port_networks)
+plot(port_maps_ant$all)
+plot(port_maps_ant$fishing)
+plot(port_maps_ant$tourism)
+plot(port_maps_ant$research)
+plot(port_maps_ant$supply)
+plot(port_maps_ant$other)
+```
+
+Save them as pdfs (and some as pngs for easy integration into word documents)
+```{r}
+port_maps_ant_all <- plot_grid(port_maps_ant$all +
+  theme(
+    legend.text = element_text(size = 7),
+    legend.title = element_text(size = 7),
+    legend.position = c(0.25, 0.16),
+    legend.box = "horizontal",
+    legend.direction = "vertical"
+  ))
+ggsave(
+  filename = "port_map_ant_all.pdf", plot = port_maps_ant_all,
+  path = here("outputs"), width = 183, height = 183, units = "mm", device = "pdf"
+)
+ggsave(
+  filename = "port_map_ant_fishing.pdf", plot = port_maps_ant$fishing,
+  path = here("outputs"), width = 7.204, height = 8, device = "pdf"
+)
+ggsave(
+  filename = "port_map_ant_tourism.pdf", plot = port_maps_ant$tourism,
+  path = here("outputs"), width = 7.204, height = 8, device = "pdf"
+)
+ggsave(
+  filename = "port_map_ant_research.pdf", plot = port_maps_ant$research,
+  path = here("outputs"), width = 7.204, height = 8, device = "pdf"
+)
+ggsave(
+  filename = "port_map_ant_supply.pdf", plot = port_maps_ant$supply,
+  path = here("outputs"), width = 7.204, height = 8, device = "pdf"
+)
+ggsave(
+  filename = "port_map_ant_other.pdf", plot = port_maps_ant$other,
+  path = here("outputs"), width = 7.204, height = 8, device = "pdf"
+)
+```
+
+# Make Antarctic ecoregion maps for each activity type
+
+```{r}
+eco_maps_ant <- make_antarctic_eco_maps(list_of_networks = ecoregion_networks, points_for_layout = eco_points)
+eco_maps_ant$all
+eco_maps_ant$fishing
+eco_maps_ant$tourism
+eco_maps_ant$research
+eco_maps_ant$supply
+eco_maps_ant$other
+```
+
+Save them as pdfs
+```{r}
+ggsave(
+  filename = "eco_map_ant_all.pdf", plot = eco_maps_ant$all,
+  path = here("outputs"), width = 10, height = 8, device = "pdf"
+)
+ggsave(
+  filename = "eco_map_ant_fishing.pdf", plot = eco_maps_ant$fishing,
+  path = here("outputs"), width = 10, height = 8, device = "pdf"
+)
+ggsave(
+  filename = "eco_map_ant_tourism.pdf", plot = eco_maps_ant$tourism,
+  path = here("outputs"), width = 10, height = 8, device = "pdf"
+)
+ggsave(
+  filename = "eco_map_ant_research.pdf", plot = eco_maps_ant$research,
+  path = here("outputs"), width = 10, height = 8, device = "pdf"
+)
+ggsave(
+  filename = "eco_map_ant_supply.pdf", plot = eco_maps_ant$supply,
+  path = here("outputs"), width = 10, height = 8, device = "pdf"
+)
+ggsave(
+  filename = "eco_map_ant_other.pdf", plot = eco_maps_ant$other,
+  path = here("outputs"), width = 10, height = 8, device = "pdf"
+)
+```
+
+### Maps of the Scotia Sea
+
+The Scotia Sea is the busiest area, as detected by the following tables that show the locations around Antarctica with the most activity and are, therefore at highest risk from introduced species. 
+```{r}
+antarctic_risk_tables <- ant_risk(port_networks)
+antarctic_risk_tables$all
+antarctic_risk_tables$fishing
+antarctic_risk_tables$tourism
+antarctic_risk_tables$research
+antarctic_risk_tables$supply
+antarctic_risk_tables$other
+```
+
+## Duration of stay in Antarctic locations
+
+We are interested in how long ships stop at Antarctic locations, especially comparing between activity types. 
+
+All activitiy types
+```{r}
+antarctic_stopping_time_all <- port_networks$all %>% 
+      activate(nodes) %>% 
+      filter(realm == "Southern Ocean") %>%
+      as_tibble() %>% 
+      summarise(ave_time = mean(mean_time, na.rm = TRUE),
+                sd_time = sd(mean_time, na.rm = TRUE),
+             ave_ships = mean(n_ships),
+             sd_ships = sd(n_ships)) %>% 
+      mutate(ave_time = duration(ave_time, "seconds"),
+             sd_time = duration(sd_time, "seconds"),
+             activity_type = "All vessels")
+  
+```
+
+Fishing
+
+```{r}
+antarctic_stopping_time_fishing <- port_networks$fishing %>% 
+      activate(nodes) %>% 
+      filter(realm == "Southern Ocean") %>%
+      as_tibble() %>% 
+      summarise(ave_time = mean(mean_time, na.rm = TRUE),
+                sd_time = sd(mean_time, na.rm = TRUE),
+             ave_ships = mean(n_ships),
+             sd_ships = sd(n_ships)) %>% 
+      mutate(ave_time = duration(ave_time, "seconds"),
+             sd_time = duration(sd_time, "seconds"),
+             activity_type = "Fishing vessels")
+  
+```
+Tourism
+```{r}
+antarctic_stopping_time_tourism <- port_networks$tourism %>% 
+      activate(nodes) %>% 
+      filter(realm == "Southern Ocean") %>%
+      as_tibble() %>% 
+      summarise(ave_time = mean(mean_time, na.rm = TRUE),
+                sd_time = sd(mean_time, na.rm = TRUE),
+             ave_ships = mean(n_ships),
+             sd_ships = sd(n_ships)) %>% 
+      mutate(ave_time = duration(ave_time, "seconds"),
+             sd_time = duration(sd_time, "seconds"),
+             activity_type = "Tourism vessels")
+  
+```
+
+Research
+```{r}
+antarctic_stopping_time_research <- port_networks$research %>% 
+      activate(nodes) %>% 
+      filter(realm == "Southern Ocean") %>%
+      as_tibble() %>% 
+      summarise(ave_time = mean(mean_time, na.rm = TRUE),
+                sd_time = sd(mean_time, na.rm = TRUE),
+             ave_ships = mean(n_ships),
+             sd_ships = sd(n_ships)) %>% 
+      mutate(ave_time = duration(ave_time, "seconds"),
+             sd_time = duration(sd_time, "seconds"),
+             activity_type = "Research vessels")
+  
+```
+Supply
+
+```{r}
+antarctic_stopping_time_supply <- port_networks$supply %>% 
+      activate(nodes) %>% 
+      filter(realm == "Southern Ocean") %>%
+      as_tibble() %>% 
+      summarise(ave_time = mean(mean_time, na.rm = TRUE),
+                sd_time = sd(mean_time, na.rm = TRUE),
+             ave_ships = mean(n_ships),
+             sd_ships = sd(n_ships)) %>% 
+      mutate(ave_time = duration(ave_time, "seconds"),
+             sd_time = duration(sd_time, "seconds"),
+             activity_type = "Supply vessels")
+```
+
+Other
+
+```{r}
+antarctic_stopping_time_other <- port_networks$other %>% 
+      activate(nodes) %>% 
+      filter(realm == "Southern Ocean") %>%
+      as_tibble() %>% 
+      summarise(ave_time = mean(mean_time, na.rm = TRUE),
+                sd_time = sd(mean_time, na.rm = TRUE),
+             ave_ships = mean(n_ships),
+             sd_ships = sd(n_ships)) %>% 
+      mutate(ave_time = duration(ave_time, "seconds"),
+             sd_time = duration(sd_time, "seconds"),
+             activity_type = "Other vessels")
+```
+
+Join them all to make it easier to look at and compare.
+
+```{r}
+antarctic_stopping_time <- antarctic_stopping_time_all %>% 
+  bind_rows(antarctic_stopping_time_fishing,
+                                     antarctic_stopping_time_tourism,
+                                     antarctic_stopping_time_research,
+                                     antarctic_stopping_time_supply,
+                                     antarctic_stopping_time_other)
+antarctic_stopping_time
+```
+
+
+Maps of the Scotia Arc might tell us something about the activity, but it is still very busy and difficult to clearly identify locations.
+```{r}
+scotia_maps_ports <- make_scotia_maps(list_of_networks = port_networks)
+scotia_maps_ports$all
+scotia_maps_ports$fishing
+scotia_maps_ports$tourism
+scotia_maps_ports$research
+scotia_maps_ports$supply
+scotia_maps_ports$other
+```
+
+# Alternative Visualisations
+
+Circle diagrams and heatmaps of ecoregion networks. 
+
+This is a bit of a proof of concept to see whether it would be easier to visualise connectivity with a circle diagram rather than with maps. Likewise, the heatmap doesn't really offer more than the maps do so I don't take this line of analysis any further.
+
+```{r}
+ecoregion_network_circle <- ggraph(ecoregion_networks$all %>% arrange(realm), layout = "linear", circular = TRUE) +
+  geom_edge_arc(aes(edge_alpha = n_voyages, color = internal)) +
+  geom_node_point(aes(color = realm),
+    size = 1
+  ) +
+  scale_color_brewer(palette = "Paired", name = "Realm") +
+  scale_edge_color_viridis(
+    discrete = TRUE, name = NULL, option = "magma",
+    begin = 0.1, end = 0.9, direction = -1
+  ) +
+  scale_edge_alpha_continuous(name = "Number of voyages") +
+  theme_void()
+plot(ecoregion_network_circle)
+
+ecoregion_network_heatmap <- ggraph(ecoregion_networks$all %>% arrange(realm), layout = "matrix") +
+  geom_edge_point(aes(
+    alpha = n_voyages,
+    color = to_realm
+  )) +
+  scale_color_brewer(palette = "Paired", name = "Realm") +
+  labs(x = ecoregion_networks$all %>% activate(edges) %>% dplyr::select(from_ecoregion), y = ecoregion_networks$all %>% activate(edges) %>% dplyr::select(to_ecoregion)) +
+  theme_void()
+
+ecoregion_network_heatmap
+```
+
+# Which Antarctic locations are most heavily visited?
+
+They are in the South Shetland Islands and Antarctic Peninsula. These tables will be used to identify the places most likely at risk, and will be used in conjunction with a map of the area. The resulting list has additional information added in the next script.
+
+
+```{r}
+port_networks$all %>%
+  activate(nodes) %>%
+  filter(realm == "Southern Ocean") %>%
+  arrange(desc(n_voyages)) %>% 
+  as_tibble() %>% 
+  view()
+
+port_networks$all %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  filter(realm == "Southern Ocean") %>%
+  dplyr::summarise(total_voyages = sum(n_voyages, na.rm = TRUE))
+```
+
+Are the top locations the same for all activity types?
+
+Fishing
+```{r}
+port_networks$fishing %>%
+  activate(nodes) %>%
+  filter(realm == "Southern Ocean") %>%
+  arrange(desc(n_voyages)) %>%
+  as_tibble()
+
+port_networks$fishing %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  filter(realm == "Southern Ocean") %>%
+  dplyr::summarise(total_voyages = sum(n_voyages, na.rm = TRUE))
+```
+
+
+Tourism
+```{r}
+port_networks$tourism %>%
+  activate(nodes) %>%
+  filter(realm == "Southern Ocean") %>%
+  arrange(desc(n_voyages)) %>%
+  as_tibble()
+
+port_networks$tourism %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  filter(realm == "Southern Ocean") %>%
+  dplyr::summarise(total_voyages = sum(n_voyages, na.rm = TRUE))
+```
+
+Research
+```{r}
+port_networks$research %>%
+  activate(nodes) %>%
+  filter(realm == "Southern Ocean") %>%
+  arrange(desc(n_voyages)) %>%
+  as_tibble()
+
+port_networks$research %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  filter(realm == "Southern Ocean") %>%
+  dplyr::summarise(total_voyages = sum(n_voyages, na.rm = TRUE))
+```
+
+Supply
+
+```{r}
+port_networks$supply %>%
+  activate(nodes) %>%
+  filter(realm == "Southern Ocean") %>%
+  arrange(desc(n_voyages)) %>%
+  as_tibble()
+
+port_networks$supply %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  filter(realm == "Southern Ocean") %>%
+  dplyr::summarise(total_voyages = sum(n_voyages, na.rm = TRUE))
+```
+
+Other
+
+```{r}
+port_networks$other %>%
+  activate(nodes) %>%
+  filter(realm == "Southern Ocean") %>%
+  arrange(desc(n_voyages)) %>%
+  as_tibble()
+
+port_networks$other %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  filter(realm == "Southern Ocean") %>%
+  dplyr::summarise(total_voyages = sum(n_voyages, na.rm = TRUE))
+```
+
