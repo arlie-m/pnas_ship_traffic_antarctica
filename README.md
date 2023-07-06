@@ -1,7 +1,6 @@
 # pnas_ship_traffic_antarctica
-The code used to analyze ship traffic data and generate figures for the publication: https://www.pnas.org/doi/full/10.1073/pnas.2110303118 
+Repository for the ship pathway and network analysis, published in PNAS as "Ship traffic connects Antarctic coasts to worldwide ecosystems" (https://www.pnas.org/doi/full/10.1073/pnas.2110303118) and included as chapter 3 of my PhD thesis.
 
-Repository for the ship pathway and network analysis, published in PNAS as "Ship traffic connects Antarctic coasts to worldwide ecosystems" and included as chapter 3 of my PhD thesis.
 ## Summary
 
 The aim of the project was to generate a network of ship activity for vessels that visited the Southern Ocean between 2014-2018 inclusive to quantify the global range and intensity of Antarctic ship traffic. Networks were generated for ports and ecoregions (ecologically similar marine areas identified in the Marine Ecoregions of the World) for all ships and for each activity type (fishing, tourism, research, supply, other). I reveal the extent of the global ship network connected to Antarctica and identify key ports and global ecoregions that are strongly connected to Antarctica, representing likely source regions for non-native species. I also test assumptions that activity is higher in certain Antarctic locations and that 'Antarctic Gateway' ports are the primary conduits through which ships travel to the Southern Ocean.
