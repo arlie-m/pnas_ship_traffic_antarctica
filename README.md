@@ -6,7 +6,7 @@ Repository for the ship pathway and network analysis, published in PNAS as "Ship
 
 The aim of the project was to generate a network of ship activity for vessels that visited the Southern Ocean between 2014-2018 inclusive to quantify the global range and intensity of Antarctic ship traffic. Networks were generated for ports and ecoregions (ecologically similar marine areas identified in the Marine Ecoregions of the World) for all ships and for each activity type (fishing, tourism, research, supply, other). I reveal the extent of the global ship network connected to Antarctica and identify key ports and global ecoregions that are strongly connected to Antarctica, representing likely source regions for non-native species. I also test assumptions that activity is higher in certain Antarctic locations and that 'Antarctic Gateway' ports are the primary conduits through which ships travel to the Southern Ocean.
 
-The best way to follow the workflow is read the annotated code and reports in the `workflow` folder. The input data, output data, figures and objects are all contained in the following directories:
+The best way to follow the workflow is read the annotated code and reports in the `workflow` folder. The input data, output data, figures and objects were all contained in the following directories, but no data can be found within this reposuitory due to licence agreements:
 
 - `data` contains all the data files imported to conduct QC and all subsequent csv data files used for scripts further down the workflow
 - `scripts` contains all scripts (.RmD or .R) used in this project.
