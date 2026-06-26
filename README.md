@@ -1,6 +1,8 @@
 # pnas_ship_traffic_antarctica
 Repository for the ship pathway and network analysis, published in PNAS as "Ship traffic connects Antarctic coasts to worldwide ecosystems" and included as chapter 3 of my PhD thesis.
-Publication DOI: [![DOI](https://www.pnas.org/doi/full/10.1073/pnas.2110303118)](https://www.pnas.org/doi/full/10.1073/pnas.2110303118)
+
+Publication DOI: (https://www.pnas.org/doi/full/10.1073/pnas.2110303118)
+
 Zenodo DOI:[![DOI](https://zenodo.org/badge/663021267.svg)](https://doi.org/10.5281/zenodo.20937120)
 
 ## Summary
