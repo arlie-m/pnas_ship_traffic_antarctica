@@ -3,7 +3,7 @@ Repository for the ship pathway and network analysis, published in PNAS as "Ship
 
 Publication DOI: (https://www.pnas.org/doi/full/10.1073/pnas.2110303118)
 
-Zenodo DOI:[![DOI](https://zenodo.org/badge/663021267.svg)](https://doi.org/10.5281/zenodo.20937120)
+Zenodo DOI: [![DOI](https://zenodo.org/badge/663021267.svg)](https://doi.org/10.5281/zenodo.20937120)
 
 ## Summary
 
